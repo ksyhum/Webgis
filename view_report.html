@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Reports with Filters</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            margin: 20px 0;
+            font-size: 2.5em;
+            color: #333;
+        }
+
+        #map {
+            width: 80vw;
+            height: 60vh;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 80%;
+            border-collapse: collapse;
+            margin-bottom: 50px;
+        }
+
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #42c7c7;
+            color: white;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        .filter-container {
+            margin-bottom: 20px;
+        }
+
+        select {
+            margin-right: 10px;
+            padding: 8px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Submitted Reports</h1>
+
+    <!-- Filter Dropdowns -->
+    <div class="filter-container">
+        <label for="categoryFilter">Category:</label>
+        <select id="categoryFilter">
+            <option value="">All</option>
+            <option value="infrastructure">Infrastructure</option>
+            <option value="cleanliness">Cleanliness</option>
+            <option value="disaster">Natural Disaster</option>
+            <option value="other">Other</option>
+        </select>
+
+        <label for="subcategoryFilter">Subcategory:</label>
+        <select id="subcategoryFilter">
+            <option value="">All</option>
+            <option value="damaged road">Damaged Road</option>
+            <option value="illegal parking">Illegal Parking</option>
+            <option value="fallen tree">Fallen Tree</option>
+            <option value="other">Other</option>
+        </select>
+
+        <label for="priorityFilter">Priority:</label>
+        <select id="priorityFilter">
+            <option value="">All</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+        </select>
+
+        <button onclick="applyFilters()">Apply Filters</button>
+    </div>
+
+    <!-- Peta Leaflet untuk menampilkan lokasi laporan -->
+    <div id="map"></div>
+
+    <!-- Tabel untuk menampilkan laporan -->
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Subcategory</th>
+                <th>Description</th>
+                <th>Priority</th>
+                <th>Kecamatan</th>
+            </tr>
+        </thead>
+        <tbody id="reportTable">
+            <!-- Laporan akan dimasukkan secara dinamis -->
+        </tbody>
+    </table>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Akses token Mapbox
+        var accessToken = 'pk.eyJ1Ijoia3N5aHVtIiwiYSI6ImNtMHoxajd2aDAxYWoybXMxMDdzZ2R2bm4ifQ.EpIBrnzd5mWq1ySVwxISsA';  // Ganti dengan access token Anda
+
+        // Peta Street Map
+        var streetMap = L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/{z}/{x}/{y}?access_token=' + accessToken, {
+            attribution: 'Map data &copy; <a href="https://www.mapbox.com/">Mapbox</a>',
+            tileSize: 512,
+            zoomOffset: -1
+        });
+
+        // Peta Satellite Map
+        var satelliteMap = L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=' + accessToken, {
+            attribution: 'Map data &copy; <a href="https://www.mapbox.com/">Mapbox</a>',
+            tileSize: 512,
+            zoomOffset: -1
+        });
+
+        // Inisialisasi peta dengan street map sebagai default
+        var map = L.map('map', {
+            center: [-2.5489, 118.0149],  // Lokasi default di Indonesia
+            zoom: 5,
+            layers: [streetMap]  // Menggunakan street map sebagai default
+        });
+
+        // Base maps: Street Map dan Satellite Map
+        var baseMaps = {
+            "Street Map": streetMap,
+            "Satellite Map": satelliteMap
+        };
+
+        // Tambahkan kontrol untuk memilih base map
+        L.control.layers(baseMaps).addTo(map);
+
+        // Variabel untuk menyimpan semua marker
+        var markers = [];
+
+        // Fungsi untuk memuat laporan pengaduan dengan filter
+        function applyFilters() {
+            const category = document.getElementById('categoryFilter').value;
+            const subcategory = document.getElementById('subcategoryFilter').value;
+            const priority = document.getElementById('priorityFilter').value;
+
+            // Bangun URL dengan query parameter
+            let url = '/api/get_all_reports?';
+            if (category) url += `category=${category}&`;
+            if (subcategory) url += `subcategory=${subcategory}&`;
+            if (priority) url += `priority=${priority}&`;
+
+            // Mengambil data dengan filter dari server
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    const reportTable = document.getElementById('reportTable');
+                    reportTable.innerHTML = '';  // Kosongkan tabel sebelum mengisi ulang
+
+                    // Hapus semua marker lama dari peta
+                    markers.forEach(marker => map.removeLayer(marker));
+                    markers = [];  // Kosongkan array markers setelah dihapus dari peta
+
+                    // Tampilkan data yang sudah difilter
+                    data.forEach(report => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${report.name}</td>
+                            <td>${report.category}</td>
+                            <td>${report.subcategory}</td>
+                            <td>${report.description}</td>
+                            <td>${report.priority}</td>
+                            <td>${report.kecamatan}</td>
+                        `;
+                        reportTable.appendChild(row);
+
+                        // Tambahkan marker ke peta untuk setiap laporan
+                        const marker = L.circleMarker([report.latitude, report.longitude], {
+                            color: report.priority === 'High' ? 'red' :
+                                   report.priority === 'Medium' ? 'yellow' :
+                                   'green',
+                            radius: 8,
+                            fillOpacity: 0.8
+                        }).addTo(map).bindPopup(`
+                            <strong>${report.name}</strong><br>
+                            Category: ${report.category}<br>
+                            Subcategory: ${report.subcategory}<br>
+                            Priority: ${report.priority}<br>
+                            Description: ${report.description}<br>
+                            Location: ${report.kecamatan}
+                        `);
+
+                        // Simpan marker ke array untuk dihapus nanti jika filter berubah
+                        markers.push(marker);
+                    });
+                })
+                .catch(error => console.error('Error fetching reports:', error));
+        }
+
+        // Panggil fungsi applyFilters untuk pertama kali saat halaman dimuat
+        applyFilters();
+    </script>
+</body>
+</html>

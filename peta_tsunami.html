@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Tsunami Map - Evacuation and Impacted Area Calculation</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.8.0/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            z-index: 1000;
+            border-radius: 8px;
+            box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.1);
+            width: 270px;
+            overflow-y: auto;
+        }
+
+        #search {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        label {
+            display: block;
+            margin-top: 8px;
+            margin-bottom: 4px;
+            font-weight: bold;
+        }
+
+        select,
+        button {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+
+        #suggestions {
+            background-color: white;
+            border: 1px solid #ccc;
+            width: 100%;
+            max-height: 150px;
+            overflow-y: auto;
+            position: absolute;
+            z-index: 1000;
+        }
+
+        #suggestions div {
+            padding: 8px;
+            cursor: pointer;
+        }
+
+        #suggestions div:hover {
+            background-color: #f0f0f0;
+        }
+
+        #luasTerdampak {
+            margin-top: 10px;
+        }
+
+        .leaflet-control-zoom {
+            position: absolute;
+            bottom: 50px;
+            right: 10px;
+            box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .leaflet-control-zoom a {
+            background-color: #007bff;
+            color: white;
+            font-size: 18px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            margin: 4px;
+            transition: background-color 0.3s ease;
+        }
+
+        .leaflet-control-zoom a:hover {
+            background-color: #0056b3;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div id="controls">
+        <input type="text" id="search" placeholder="Search Address" oninput="autocompleteAddress()" />
+        <div id="suggestions"></div>
+
+        <label for="routeMode">Transportation Mode:</label>
+        <select id="routeMode">
+            <option value="driving">Driving</option>
+            <option value="walking">Walking</option>
+        </select>
+
+        <label for="basemap">Basemap:</label>
+        <select id="basemap" onchange="changeBaseMap()">
+            <option value="osm">OpenStreetMap</option>
+            <option value="mapbox">Mapbox Streets</option>
+            <option value="satellite">Satellite</option>
+        </select>
+
+        <label for="layerSelection">Select Layer for Map:</label>
+        <select id="layerSelection" onchange="toggleLayer()">
+            <option value="kecamatanLayer">Kommun</option>
+            <option value="satuMeterLayer">Run-up 1 Meter</option>
+            <option value="duaMeterLayer">Run-up 2 Meters</option>
+            <option value="limaMeterLayer">Run-up 5 Meters</option>
+            <option value="limaBelasMeterLayer">Run-up 15 Meters</option>
+            <option value="tigaPuluhMeterLayer">Run-up 30 Meters</option>
+            <option value="enamPuluhMeterLayer">Run-up 60 Meters</option>
+        </select>
+
+        <label for="runupSelection">Calculate Impacted Area:</label>
+        <select id="runupSelection" onchange="hitungLuasTerdampak()">
+            <option value="1">Run-up 1 Meter</option>
+            <option value="2">Run-up 2 Meters</option>
+            <option value="5">Run-up 5 Meters</option>
+            <option value="15">Run-up 15 Meters</option>
+            <option value="30">Run-up 30 Meters</option>
+            <option value="60">Run-up 60 Meters</option>
+        </select>
+
+        <button id="clearRouteButton" onclick="clearRoute()">Clear Route</button>
+        <div id="luasTerdampak"></div>
+    </div>
+
+    <div id="map" style="width:100%; height: 100vh"></div>
+
+    <script src="https://unpkg.com/leaflet@1.8.0/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+    <script>
+        var mapboxAccessToken = 'pk.eyJ1Ijoia3N5aHVtIiwiYSI6ImNtMHoxajd2aDAxYWoybXMxMDdzZ2R2bm4ifQ.EpIBrnzd5mWq1ySVwxISsA'; // Replace with your API key
+        var routingControl;
+        var map = L.map('map', { zoomControl: true }).setView([5.5483, 95.3238], 13); // Banda Aceh Coordinates
+
+        var baseLayers = {
+            osm: L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png', { attribution: 'Leaflet &copy; OpenStreetMap', maxZoom: 18 }),
+            mapbox: L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/{z}/{x}/{y}?access_token=' + mapboxAccessToken, { attribution: 'Mapbox', maxZoom: 18 }),
+            satellite: L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=' + mapboxAccessToken, { attribution: 'Mapbox', maxZoom: 18 })
+        };
+
+        baseLayers.osm.addTo(map);
+
+        // Evacuation Points
+        var arrowIcon = L.icon({
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/271/271228.png',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20]
+        });
+
+        var evacuationIcon = L.icon({
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/1946/1946488.png',
+            iconSize: [40, 40]
+        });
+
+        var evacuationPoints = [
+            { name: "Masjid Raya Baiturrahman", coords: [5.5538, 95.3175] },
+            { name: "Stadion Harapan Bangsa", coords: [5.5506, 95.3455] },
+            { name: "PLTD Apung", coords: [5.5509, 95.3210] },
+            { name: "Museum Tsunami Aceh", coords: [5.5480, 95.3228] },
+            { name: "Taman Sari Gunongan", coords: [5.5521, 95.3274] }
+        ];
+
+        evacuationPoints.forEach(function (point) {
+            L.marker(point.coords, { icon: evacuationIcon }).addTo(map)
+                .bindPopup("<b>" + point.name + "</b><br>Coordinates: " + point.coords.join(', '));
+        });
+
+        function changeBaseMap() {
+            var selectedBasemap = document.getElementById('basemap').value;
+            map.eachLayer(function (layer) {
+                map.removeLayer(layer);
+            });
+            baseLayers[selectedBasemap].addTo(map);
+
+            evacuationPoints.forEach(function (point) {
+                L.marker(point.coords, { icon: evacuationIcon }).addTo(map)
+                    .bindPopup("<b>" + point.name + "</b><br>Coordinates: " + point.coords.join(', '));
+            });
+        }
+
+        function findNearestEvacuationPoint(clickLatLng) {
+            var nearestPoint = evacuationPoints[0];
+            var nearestDistance = map.distance(clickLatLng, L.latLng(nearestPoint.coords));
+
+            evacuationPoints.forEach(function (point) {
+                var distance = map.distance(clickLatLng, L.latLng(point.coords));
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestPoint = point;
+                }
+            });
+
+            return nearestPoint;
+        }
+
+        var marker = L.marker([5.5483, 95.3238], { icon: arrowIcon }).addTo(map);
+
+        function createRouting(startLatLng, endLatLng, mode) {
+            var profile = mode === 'walking' ? 'walking' : 'driving';
+
+            if (routingControl) {
+                map.removeControl(routingControl);
+            }
+
+            routingControl = L.Routing.control({
+                waypoints: [
+                    L.latLng(startLatLng.lat, startLatLng.lng),
+                    L.latLng(endLatLng.coords[0], endLatLng.coords[1])
+                ],
+                router: L.Routing.mapbox(mapboxAccessToken, { profile: 'mapbox/' + profile }),
+                lineOptions: {
+                    styles: [{ color: 'blue', weight: 4 }]
+                }
+            }).on('routesfound', function (e) {
+                var routes = e.routes;
+
+                // Hapus marker jika sudah ada
+                if (marker) {
+                    map.removeLayer(marker);
+                }
+
+                // Tambahkan marker panah pada titik awal
+                marker = L.marker([startLatLng.lat, startLatLng.lng], { icon: arrowIcon }).addTo(map);
+
+                // Pergerakan panah mengikuti rute
+                routes[0].coordinates.forEach(function (coord, index) {
+                    setTimeout(function () {
+                        marker.setLatLng([coord.lat, coord.lng]);  // Memperbarui posisi marker
+                    }, 100 * index);  // Timer untuk pergerakan marker
+                });
+            }).addTo(map);
+        }
+
+        function autocompleteAddress() {
+            var searchQuery = document.getElementById('search').value;
+            var suggestionsDiv = document.getElementById('suggestions');
+
+            if (searchQuery.length < 3) {
+                suggestionsDiv.innerHTML = '';
+                return;
+            }
+
+            var geocodingUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(searchQuery)}.json?access_token=${mapboxAccessToken}&autocomplete=true&limit=5`;
+
+            fetch(geocodingUrl)
+                .then(response => response.json())
+                .then(data => {
+                    suggestionsDiv.innerHTML = '';
+
+                    data.features.forEach(function (feature) {
+                        var suggestionItem = document.createElement('div');
+                        suggestionItem.textContent = feature.place_name;
+                        suggestionItem.onclick = function () {
+                            selectSuggestion(feature);
+                        };
+                        suggestionsDiv.appendChild(suggestionItem);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function selectSuggestion(feature) {
+            var latLng = feature.center;
+            var startLatLng = { lat: latLng[1], lng: latLng[0] };
+
+            document.getElementById('suggestions').innerHTML = '';
+            document.getElementById('search').value = feature.place_name;
+
+            var nearestEvacuationPoint = findNearestEvacuationPoint(startLatLng);
+            var mode = document.getElementById('routeMode').value;
+
+            createRouting(startLatLng, nearestEvacuationPoint, mode);
+        }
+
+        map.on('click', function (e) {
+            var nearestEvacuationPoint = findNearestEvacuationPoint(e.latlng);
+            var mode = document.getElementById('routeMode').value;
+
+            createRouting(e.latlng, nearestEvacuationPoint, mode);
+        });
+
+        function clearRoute() {
+            if (routingControl) {
+                map.removeControl(routingControl);
+                routingControl = null;
+            }
+        }
+
+        // Load and display GeoJSON layers
+        var layerControls = {};
+
+        function loadGeoJSON(url, style, layerName) {
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    var layer = L.geoJSON(data, { style: style });
+                    layerControls[layerName] = layer;
+                })
+                .catch(error => console.error('Error loading GeoJSON:', error));
+        }
+
+        loadGeoJSON('/api/kecamatan', { color: "#3388ff", weight: 2 }, 'kecamatanLayer');
+        loadGeoJSON('/api/satumeter', { color: "#ff0000", weight: 2 }, 'satuMeterLayer');
+        loadGeoJSON('/api/duameter', { color: "#ff7f00", weight: 2 }, 'duaMeterLayer');
+        loadGeoJSON('/api/limameter', { color: "#ffff00", weight: 2 }, 'limaMeterLayer');
+        loadGeoJSON('/api/limabelasmeter', { color: "#7fff00", weight: 2 }, 'limaBelasMeterLayer');
+        loadGeoJSON('/api/tigapuluhmeter', { color: "#00ff00", weight: 2 }, 'tigaPuluhMeterLayer');
+        loadGeoJSON('/api/enampuluhmeter', { color: "#0000ff", weight: 2 }, 'enamPuluhMeterLayer');
+
+        function toggleLayer() {
+            var selectedLayer = document.getElementById('layerSelection').value;
+
+            Object.values(layerControls).forEach(layer => {
+                map.removeLayer(layer);
+            });
+
+            if (layerControls[selectedLayer]) {
+                layerControls[selectedLayer].addTo(map);
+            }
+        }
+
+        function hitungLuasTerdampak() {
+            var selectedHeight = document.getElementById('runupSelection').value;
+
+            fetch(`/api/luas_terdampak/${selectedHeight}`)
+                .then(response => response.json())
+                .then(data => {
+                    let htmlKecamatan = '<h3>Impacted Area per Kommun</h3>';
+                    htmlKecamatan += '<table><tr><th>Kommun</th><th>Impacted Area (m²)</th></tr>';
+                    data.kecamatan.forEach(row => {
+                        htmlKecamatan += `<tr><td>${row.kecamatan}</td><td>${row.luas_terdampak}</td></tr>`;
+                    });
+                    htmlKecamatan += '</table>';
+
+                    let htmlGunaLahan = '<h3>Impacted Area per Land Use</h3>';
+                    htmlGunaLahan += '<table><tr><th>Land Use</th><th>Impacted Area (m²)</th></tr>';
+                    data.gunaLahan.forEach(row => {
+                        htmlGunaLahan += `<tr><td>${row.gunalahan || 'Unknown'}</td><td>${row.luas_terdampak}</td></tr>`;
+                    });
+                    htmlGunaLahan += '</table>';
+
+                    document.getElementById('luasTerdampak').innerHTML = htmlKecamatan + htmlGunaLahan;
+                })
+                .catch(error => console.error('Error fetching impacted area:', error));
+        }
+    </script>
+</body>
+
+</html>

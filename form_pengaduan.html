@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complaint Form and Map Visualization</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: flex-start;
+            align-items: flex-start;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+        }
+
+        .form-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 300px;
+            margin-right: 20px;
+        }
+
+        h2 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 10px;
+            background-color: #42c7c7;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .submit-btn:hover {
+            background-color: #39b3b3;
+        }
+
+        #map {
+            width: 70vw;
+            height: 100vh;
+        }
+
+        /* Custom Control Style */
+        .leaflet-control-custom {
+            background-color: #333;
+            color: white;
+            font-size: 18px;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            text-align: center;
+            display: inline-block;
+        }
+
+        .leaflet-control-custom i {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .leaflet-control-custom:hover {
+            background-color: #555;
+        }
+
+        /* Styling for vertical control panel */
+        .leaflet-control-custom-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Complaint Form -->
+    <div class="form-container">
+        <h2>Complaint Form</h2>
+        <form id="complaintForm" enctype="multipart/form-data" method="POST">
+            <label for="name">Name:</label>
+            <input type="text" id="name" name="name" required>
+
+            <label for="category">Category:</label>
+            <select id="category" name="category" required>
+                <option value="">Select Category</option>
+                <option value="infrastructure">Infrastructure</option>
+                <option value="cleanliness">Cleanliness</option>
+                <option value="disaster">Natural Disaster</option>
+            </select>
+
+            <label for="subcategory">Sub Category:</label>
+            <select id="subcategory" name="subcategory" required>
+                <option value="">Select Sub Category</option>
+            </select>
+
+            <label for="description">Description:</label>
+            <textarea id="description" name="description" rows="4" required></textarea>
+
+            <label for="photo">Upload Photo:</label>
+            <input type="file" id="photo" name="photo" accept="image/*" required>
+
+            <label for="priority">Priority:</label>
+            <select id="priority" name="priority" required>
+                <option value="">Select Priority</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+            </select>
+
+            <label>Location:</label>
+            <input type="text" id="location" name="location" readonly>
+
+            <input type="hidden" id="latitude" name="latitude">
+            <input type="hidden" id="longitude" name="longitude">
+
+            <button type="submit" class="submit-btn">Submit Complaint</button>
+        </form>
+
+        <h3>Information per Kommun</h3>
+        <div id="kommunReport">
+            <!-- Kommun data will be loaded here -->
+        </div>
+    </div>
+
+    <!-- Map Visualization -->
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.js"></script>
+
+    <script>
+        // Inisialisasi peta
+        var map = L.map('map').setView([-2.5489, 118.0149], 5);
+
+        // Tambahkan base layer Mapbox Satellite dan Streets menggunakan akses token
+        var accessToken = 'pk.eyJ1Ijoia3N5aHVtIiwiYSI6ImNtMHoxajd2aDAxYWoybXMxMDdzZ2R2bm4ifQ.EpIBrnzd5mWq1ySVwxISsA';  // Ganti dengan access token Anda
+
+        var satelliteLayer = L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/{z}/{x}/{y}?access_token=' + accessToken, {
+            attribution: 'Map data &copy; <a href="https://www.mapbox.com/">Mapbox</a>',
+            tileSize: 512,
+            zoomOffset: -1
+        }).addTo(map);
+
+        var streetLayer = L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/256/{z}/{x}/{y}?access_token=' + accessToken, {
+            attribution: 'Map data &copy; <a href="https://www.mapbox.com/">Mapbox</a>',
+            tileSize: 512,
+            zoomOffset: -1
+        });
+
+        // Kontrol Custom untuk Tombol Base Map dan Fitur Lainnya
+        L.Control.CustomControl = L.Control.extend({
+            onAdd: function(map) {
+                var container = L.DomUtil.create('div', 'leaflet-control-custom-container');
+
+                var zoomInButton = L.DomUtil.create('div', 'leaflet-control-custom', container);
+                zoomInButton.innerHTML = '<i class="fas fa-plus"></i>';
+                zoomInButton.onclick = function() {
+                    map.zoomIn();
+                };
+
+                var zoomOutButton = L.DomUtil.create('div', 'leaflet-control-custom', container);
+                zoomOutButton.innerHTML = '<i class="fas fa-minus"></i>';
+                zoomOutButton.onclick = function() {
+                    map.zoomOut();
+                };
+
+                var locateButton = L.DomUtil.create('div', 'leaflet-control-custom', container);
+                locateButton.innerHTML = '<i class="fas fa-location-arrow"></i>';
+                locateButton.onclick = function() {
+                    map.locate({setView: true, maxZoom: 16});
+                };
+
+                // Tombol untuk memilih layer (Satelit atau Street Map)
+                var layerButton = L.DomUtil.create('div', 'leaflet-control-custom', container);
+                layerButton.innerHTML = '<i class="fas fa-layer-group"></i>';
+                layerButton.onclick = function() {
+                    if (map.hasLayer(satelliteLayer)) {
+                        map.removeLayer(satelliteLayer);
+                        map.addLayer(streetLayer);
+                    } else {
+                        map.removeLayer(streetLayer);
+                        map.addLayer(satelliteLayer);
+                    }
+                };
+
+                return container;
+            },
+
+            onRemove: function(map) {
+                // Cleanup if needed
+            }
+        });
+
+        L.control.customControl = function(opts) {
+            return new L.Control.CustomControl(opts);
+        }
+
+        // Tambahkan Custom Kontrol ke Peta
+        L.control.customControl({ position: 'topright' }).addTo(map);
+
+        var marker;
+
+        // Warna awal marker jika belum ada prioritas yang dipilih
+        var defaultColor = '';
+        var markerColor = defaultColor; // Default biru
+
+        // Fungsi untuk mengubah derajat, menit, detik (DMS) ke desimal
+        function dmsToDecimal(deg, min, sec, dir) {
+            var decimal = deg + min / 60 + sec / 3600;
+            return (dir == "S" || dir == "W") ? decimal * -1 : decimal;
+        }
+
+        // Fungsi untuk membaca geotag dari EXIF
+        function readEXIFData(file) {
+            EXIF.getData(file, function() {
+                var lat = EXIF.getTag(this, "GPSLatitude");
+                var lng = EXIF.getTag(this, "GPSLongitude");
+                var latRef = EXIF.getTag(this, "GPSLatitudeRef");
+                var lngRef = EXIF.getTag(this, "GPSLongitudeRef");
+
+                if (lat && lng) {
+                    var latitude = dmsToDecimal(lat[0], lat[1], lat[2], latRef);
+                    var longitude = dmsToDecimal(lng[0], lng[1], lng[2], lngRef);
+
+                    document.getElementById('latitude').value = latitude;
+                    document.getElementById('longitude').value = longitude;
+                    document.getElementById('location').value = 'Latitude: ' + latitude + ', Longitude: ' + longitude;
+
+                    if (marker) {
+                        map.removeLayer(marker);
+                    }
+
+                    // Tambahkan marker berupa lingkaran dengan warna sesuai prioritas yang dipilih
+                    marker = L.circleMarker([latitude, longitude], {
+                        color: markerColor,  // Gunakan warna marker yang telah ditentukan
+                        radius: 10,
+                        fillOpacity: 0.8
+                    }).addTo(map).bindPopup("Your Location Report" + markerColor).openPopup();
+
+                    map.setView([latitude, longitude], 15);
+                } else {
+                    alert('Geotag not found in the photo.');
+                }
+            });
+        }
+
+        // Fungsi untuk memperbarui warna marker berdasarkan pilihan prioritas
+        document.getElementById('priority').addEventListener('change', function() {
+            var priority = this.value;
+
+            if (priority === 'High') {
+                markerColor = 'red'; // Red for high priority
+            } else if (priority === 'Medium') {
+                markerColor = 'yellow'; // Yellow for medium priority
+            } else if (priority === 'Low') {
+                markerColor = 'green'; // Green for low priority
+            } else {
+                markerColor = defaultColor; // Reset to blue if not selected
+            }
+
+            // If marker already exists on the map, update its color
+            if (marker) {
+                marker.setStyle({ color: markerColor });
+            }
+        });
+
+        // Deteksi perubahan input file dan cek geotag pada foto yang diunggah
+        document.getElementById('photo').addEventListener('change', function(event) {
+            var file = event.target.files[0];
+            if (file) {
+                readEXIFData(file);
+            }
+        });
+
+        // Fungsi untuk memperbarui subkategori berdasarkan kategori yang dipilih
+        document.getElementById('category').addEventListener('change', function() {
+            var subcategorySelect = document.getElementById('subcategory');
+            var category = this.value;
+
+            subcategorySelect.innerHTML = '<option value="">Select Sub Category</option>';
+
+            if (category === 'infrastructure') {
+                subcategorySelect.innerHTML += `
+                    <option value="damaged road">Damaged Road</option>
+                    <option value="illegal parking">Illegal Parking</option>
+                    <option value="illegal building">Illegal Building</option>
+                    <option value="other">Other</option>`;
+            } else if (category === 'cleanliness') {
+                subcategorySelect.innerHTML += `
+                    <option value="trash">Trash</option>
+                    <option value="clogged irrigation">Clogged Irrigation</option>
+                    <option value="vandalism">Vandalism</option>
+                    <option value="other">Other</option>`;
+            } else if (category === 'disaster') {
+                subcategorySelect.innerHTML += `
+                    <option value="fallen tree">Fallen Tree</option>
+                    <option value="other">Other</option>`;
+            }
+        });
+
+        // Fungsi untuk memuat laporan per kecamatan
+        function loadKommunReport() {
+            fetch('/get_laporan_by_kecamatan')
+                .then(response => response.json())
+                .then(data => {
+                    let reportHTML = '';
+                    data.forEach(kommun => {
+                        reportHTML += `
+                            <p><strong>${kommun.kommun}</strong><br>
+                            High Priority Reports: ${kommun.high_priority_reports}<br>
+                            Medium Priority Reports: ${kommun.medium_priority_reports}<br>
+                            Low Priority Reports: ${kommun.low_priority_reports}</p>
+                        `;
+                    });
+                    document.getElementById('kommunReport').innerHTML = reportHTML;
+                })
+                .catch(error => {
+                    console.error('Error fetching kommun reports:', error);
+                });
+        }
+
+        // Panggil fungsi saat halaman dimuat
+        loadKommunReport();
+
+        // AJAX untuk pengiriman form pengaduan
+        document.getElementById('complaintForm').addEventListener('submit', function(event) {
+            event.preventDefault(); // Mencegah form dari pengiriman normal
+
+            // Ambil data dari form
+            var formData = new FormData(this);
+
+            // Kirim data menggunakan Fetch API (AJAX)
+            fetch('/submit_pengaduan', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    // Tampilkan pop-up jika pengiriman berhasil
+                    alert(data.message);
+                } else if (data.error) {
+                    // Tampilkan pesan error jika ada
+                    alert('An error occurred: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while submitting the complaint.');
+            });
+        });
+    </script>
+
+</body>
+</html>
